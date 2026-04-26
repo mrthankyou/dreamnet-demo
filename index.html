@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DreamNet</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: monospace; }
+    canvas { display: block; }
+
+    #overlay {
+      position: fixed; inset: 0; z-index: 20;
+      background: rgba(0,0,0,0.92);
+      color: #0ff; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      cursor: pointer; letter-spacing: 0.2em; text-transform: uppercase;
+    }
+    #overlay h1 { font-size: 2rem; margin-bottom: 0.75rem; }
+    #overlay p  { font-size: 0.65rem; opacity: 0.4; }
+
+    #hud {
+      position: fixed; top: 20px; left: 24px; z-index: 8;
+      color: #0ff; font-size: 0.7rem; letter-spacing: 0.25em;
+      text-transform: uppercase; pointer-events: none;
+      text-shadow: 0 0 8px #0ff;
+    }
+    #restart-btn {
+      position: fixed; top: 14px; right: 20px; z-index: 8;
+      color: #0ff; font-size: 0.6rem; letter-spacing: 0.15em;
+      text-transform: uppercase; background: none;
+      border: 1px solid rgba(0,255,255,0.3);
+      padding: 6px 14px; cursor: pointer; opacity: 0.55;
+    }
+    #restart-btn:hover { opacity: 1; border-color: #0ff; }
+
+    #scanlines {
+      position: fixed; inset: 0; pointer-events: none; z-index: 10;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px,
+        rgba(0,0,0,0.13) 2px, rgba(0,0,0,0.13) 4px);
+    }
+    #vignette {
+      position: fixed; inset: 0; pointer-events: none; z-index: 9;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.78) 100%);
+    }
+    #suck-overlay {
+      position: fixed; inset: 0; pointer-events: none; z-index: 11; opacity: 0;
+      background: radial-gradient(ellipse at center, transparent 15%, rgba(255,50,0,0.7) 100%);
+    }
+
+    /* ── Hit flash & death screen ── */
+    #hit-flash {
+      position: fixed; inset: 0; pointer-events: none; z-index: 13;
+      background: rgba(255,0,0,0.55); opacity: 0; transition: opacity 0.15s ease;
+    }
+    #death-screen {
+      position: fixed; inset: 0; z-index: 30; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.9); font-family: monospace;
+      letter-spacing: 0.25em; text-transform: uppercase;
+    }
+    #death-title {
+      font-size: 2.5rem; color: #ff2200;
+      text-shadow: 0 0 30px #ff2200, 0 0 60px #ff0000;
+      margin-bottom: 0.4rem;
+    }
+    #death-sub {
+      font-size: 0.65rem; color: #ff6644; opacity: 0.65; margin-bottom: 2rem;
+    }
+    #death-restart {
+      font-family: monospace; font-size: 0.65rem; letter-spacing: 0.2em;
+      color: #ff4422; background: rgba(255,34,0,0.1);
+      border: 1px solid rgba(255,34,0,0.5); padding: 10px 24px; cursor: pointer;
+    }
+    #death-restart:hover { background: rgba(255,34,0,0.25); }
+
+    /* ── L1 hint ── */
+    #l1-hint {
+      position: fixed; top: 38%; left: 50%; transform: translateX(-50%);
+      z-index: 8; pointer-events: none;
+      color: #0ff; font-size: 0.9rem; letter-spacing: 0.35em;
+      text-transform: uppercase; text-shadow: 0 0 18px #0ff;
+      background: rgba(0,0,0,0.55); padding: 8px 20px;
+      opacity: 0; transition: opacity 2s ease;
+    }
+
+    /* ── Weapon UI (L2 only) ── */
+    #weapon-ui { display: none; }
+
+    #crosshair {
+      position: fixed; top: 50%; left: 50%; z-index: 8; pointer-events: none;
+      transform: translate(-50%, -50%); width: 18px; height: 18px;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: #00ff44;
+      box-shadow: 0 0 5px #00ff44;
+    }
+    #crosshair::before { width: 18px; height: 2px; top: 8px; left: 0; }
+    #crosshair::after  { width: 2px; height: 18px; top: 0; left: 8px; }
+
+    #fire-panel {
+      position: fixed; bottom: 28px; right: 28px; z-index: 8;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      pointer-events: all;
+    }
+    #gun-arrow {
+      color: #00ff44; font-size: 1.5rem; line-height: 1;
+      text-shadow: 0 0 12px #00ff44;
+      animation: arrow-bob 1.1s ease-in-out infinite;
+    }
+    @keyframes arrow-bob {
+      0%, 100% { transform: translateY(0);   opacity: 0.6; }
+      50%       { transform: translateY(-5px); opacity: 1;   }
+    }
+    #fire-btn-l2 {
+      font-family: monospace; font-size: 0.65rem; letter-spacing: 0.2em;
+      text-transform: uppercase; color: #00ff44;
+      background: rgba(0,255,68,0.07);
+      border: 1px solid rgba(0,255,68,0.45);
+      padding: 10px 20px; cursor: pointer;
+      text-shadow: 0 0 6px #00ff44;
+    }
+    #fire-btn-l2:hover  { background: rgba(0,255,68,0.18); border-color: #00ff44; }
+    #fire-btn-l2:active { background: rgba(0,255,68,0.32); }
+  </style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>DreamNet</h1>
+  <p>click to enter &nbsp;·&nbsp; WASD · space to jump · R to restart</p>
+</div>
+<div id="hud">LEVEL&nbsp;01</div>
+<button id="restart-btn">[ R ]&nbsp; RESTART</button>
+<div id="scanlines"></div>
+<div id="vignette"></div>
+<div id="suck-overlay"></div>
+<div id="hit-flash"></div>
+<div id="death-screen">
+  <div id="death-title">System Failure</div>
+  <div id="death-sub">neural link severed by langolier</div>
+  <button id="death-restart">[ R ] &nbsp;Reboot System</button>
+</div>
+<div id="l1-hint">Find the black hole</div>
+
+<div id="weapon-ui">
+  <div id="crosshair"></div>
+  <div id="fire-panel">
+    <div id="gun-arrow">▲</div>
+    <button id="fire-btn-l2">[ F ] &nbsp;FIRE</button>
+  </div>
+</div>
+
+<script type="importmap">
+  {"imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }}
+</script>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let state = 'l1'; // 'l1' | 'hyperspace' | 'l2'
+  let hyperspaceTimer = 0;
+
+  const hud        = document.getElementById('hud');
+  const suckOverlay = document.getElementById('suck-overlay');
+
+  function updateHUD() {
+    hud.textContent = state === 'l2' ? 'LEVEL 02' : 'LEVEL 01';
+  }
+
+  // ── Renderer ───────────────────────────────────────────────────────────────
+  const renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(1);
+  document.body.appendChild(renderer.domElement);
+
+  // ── Main scene ─────────────────────────────────────────────────────────────
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000208);
+  scene.fog = new THREE.FogExp2(0x000208, 0.025);
+
+  const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.1, 500);
+  camera.position.set(0, 2, 0);
+
+  // ── Controls ───────────────────────────────────────────────────────────────
+  const controls = new PointerLockControls(camera, renderer.domElement);
+  const overlay  = document.getElementById('overlay');
+  overlay.addEventListener('click', () => controls.lock());
+  controls.addEventListener('lock',   () => { overlay.style.display = 'none'; if (state === 'l1') showL1Hint(); });
+  controls.addEventListener('unlock', () => overlay.style.display = 'flex');
+
+  const keys = {};
+  let jumpPressed = false;
+  document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Space') jumpPressed = true;
+    if (e.code === 'KeyR') restartGame();
+    // KeyF held → handled in animate loop via keys['KeyF']
+  });
+  document.addEventListener('keyup', e => keys[e.code] = false);
+  let mouseFireHeld = false;
+  document.addEventListener('mousedown', e => { if (e.button === 0) mouseFireHeld = true; });
+  document.addEventListener('mouseup',   e => { if (e.button === 0) mouseFireHeld = false; });
+  document.getElementById('restart-btn').addEventListener('click', restartGame);
+  const fireBtn = document.getElementById('fire-btn-l2');
+  fireBtn.addEventListener('pointerdown',  e => { e.preventDefault(); mouseFireHeld = true; });
+  fireBtn.addEventListener('pointerup',    ()  => { mouseFireHeld = false; });
+  fireBtn.addEventListener('pointercancel',()  => { mouseFireHeld = false; });
+
+  // ── Laser system ───────────────────────────────────────────────────────────
+  const lasers = [];
+  let lastFireTime = -1;
+  const LASER_SPEED    = 90;
+  const LASER_LIFETIME = 1.4;
+  const LASER_COOLDOWN = 0.12;
+  const weaponUI = document.getElementById('weapon-ui');
+  const l1Hint   = document.getElementById('l1-hint');
+  let   l1HintTimer = null;
+
+  function showL1Hint() {
+    clearTimeout(l1HintTimer);
+    l1Hint.style.transition = 'opacity 2s ease';
+    l1Hint.style.opacity = '1';
+    l1HintTimer = setTimeout(() => { l1Hint.style.opacity = '0'; }, 10000);
+  }
+
+  function fireLaser() {
+    if (state !== 'l2' || !controls.isLocked) return;
+    const now = clock ? clock.getElapsedTime() : 0;
+    if (now - lastFireTime < LASER_COOLDOWN) return;
+    lastFireTime = now;
+
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+
+    // Thin cylinder aligned along Z, then rotated to match fire direction
+    const geo = new THREE.CylinderGeometry(0.05, 0.05, 3, 6);
+    geo.rotateX(Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x00ff44, fog: false,
+      transparent: true, opacity: 1.0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(camera.position).addScaledVector(dir, 2);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    scene.add(mesh);
+    lasers.push({ mesh, mat, dir: dir.clone(), life: LASER_LIFETIME });
+  }
+
+  // ── Langolier system ──────────────────────────────────────────────────────
+  const langoliers        = [];
+  let   playerHp          = 4;
+  let   playerHitCooldown = 0;
+  let   playerDead        = false;
+  let   langSpawnTimer    = 3;
+  const MAX_LANG          = 6;
+  const LANG_CHASE_SPEED  = 10;
+  const LANG_IDLE_SPEED   = 2;
+  const LANG_SPOT_RADIUS  = 18;
+  const LANG_HIT_RADIUS   = 2.0;
+  const LASER_HIT_RADIUS  = 1.4;
+  const PLAYER_HIT_CD     = 1.2;
+
+  const hitFlash    = document.getElementById('hit-flash');
+  const deathScreen = document.getElementById('death-screen');
+  document.getElementById('death-restart').addEventListener('click', restartGame);
+
+  // Shared glow texture for all langoliers
+  const langGlowTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(64,64,0, 64,64,64);
+    g.addColorStop(0,   'rgba(255,120, 40,1.0)');
+    g.addColorStop(0.3, 'rgba(255, 30,  0,0.6)');
+    g.addColorStop(0.7, 'rgba(180,  0,  0,0.2)');
+    g.addColorStop(1,   'rgba(0,    0,  0,0.0)');
+    ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
+    return new THREE.CanvasTexture(c);
+  })();
+
+  function createLangolier(pos) {
+    const group = new THREE.Group();
+    const core  = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.65, 0),
+      new THREE.MeshBasicMaterial({ color: 0x1a0000 })
+    );
+    const teeth = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(1.0, 1),
+      new THREE.MeshBasicMaterial({
+        color: 0xff2200, wireframe: true, fog: false,
+        transparent: true, opacity: 0.95,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      })
+    );
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: langGlowTex, transparent: true, fog: false,
+      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.85,
+    }));
+    glow.scale.set(10, 10, 1);
+    group.add(core, teeth, glow);
+    group.position.copy(pos);
+    scene.add(group);
+    return {
+      group, teeth, glow,
+      hp: 3,
+      state: 'idle',
+      vel: new THREE.Vector3((Math.random()-0.5)*4, (Math.random()-0.5)*1.5, (Math.random()-0.5)*4),
+      idleTimer:  1.5 + Math.random() * 2,
+      spotTimer:  0.5 + Math.random() * 1.5,
+      flashTimer: 0,
+    };
+  }
+
+  function removeLangolier(lang) {
+    scene.remove(lang.group);
+    lang.group.traverse(c => {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    });
+  }
+
+  function takeDamage() {
+    if (playerDead || playerHitCooldown > 0) return;
+    playerHp--;
+    playerHitCooldown = PLAYER_HIT_CD;
+    hitFlash.style.opacity = '0.65';
+    setTimeout(() => { hitFlash.style.opacity = '0'; }, 180);
+    if (playerHp <= 0) {
+      playerDead = true;
+      deathScreen.style.display = 'flex';
+    }
+  }
+
+  function clearLangoliers() {
+    for (const lang of langoliers) removeLangolier(lang);
+    langoliers.length = 0;
+  }
+
+  function updateLangoliers(delta) {
+    if (playerDead) return;
+
+    // Spawn
+    langSpawnTimer -= delta;
+    if (langSpawnTimer <= 0 && langoliers.length < MAX_LANG) {
+      langSpawnTimer = 3 + Math.random() * 2;
+      const angle = Math.random() * Math.PI * 2;
+      const dist  = 28 + Math.random() * 14;
+      langoliers.push(createLangolier(new THREE.Vector3(
+        camera.position.x + Math.cos(angle) * dist,
+        camera.position.y + 1.5 + Math.random() * 3,
+        camera.position.z + Math.sin(angle) * dist,
+      )));
+    }
+
+    for (let i = langoliers.length - 1; i >= 0; i--) {
+      const lang = langoliers[i];
+
+      // Spinning teeth + glow pulse
+      lang.teeth.rotation.y += delta * 3.5;
+      lang.teeth.rotation.x += delta * 1.8;
+      lang.glowPhase = (lang.glowPhase || 0) + delta * 2.8;
+      lang.glow.material.opacity = 0.55 + 0.35 * Math.sin(lang.glowPhase);
+
+      // Hit flash fade
+      if (lang.flashTimer > 0) {
+        lang.flashTimer -= delta;
+        if (lang.flashTimer <= 0) lang.teeth.material.color.setHex(0xff2200);
+      }
+
+      const toPlayer = new THREE.Vector3().subVectors(camera.position, lang.group.position);
+      const distToPlayer = toPlayer.length();
+
+      if (lang.state === 'idle') {
+        lang.group.position.addScaledVector(lang.vel.clone().normalize(), LANG_IDLE_SPEED * delta);
+
+        lang.idleTimer -= delta;
+        if (lang.idleTimer <= 0) {
+          lang.idleTimer = 1.5 + Math.random() * 2;
+          lang.vel.set((Math.random()-0.5)*4, (Math.random()-0.5)*1.5, (Math.random()-0.5)*4);
+        }
+
+        lang.spotTimer -= delta;
+        if (lang.spotTimer <= 0) {
+          lang.spotTimer = 0.8 + Math.random() * 1.5;
+          if (Math.random() < 0.15) lang.state = 'chasing';
+        }
+        if (distToPlayer < LANG_SPOT_RADIUS) lang.state = 'chasing';
+
+      } else {
+        // Chase
+        if (distToPlayer > 0.1) {
+          lang.group.position.addScaledVector(toPlayer.normalize(), LANG_CHASE_SPEED * delta);
+        }
+        if (distToPlayer < LANG_HIT_RADIUS) {
+          takeDamage();
+          // Knock back away from player
+          lang.group.position.addScaledVector(
+            new THREE.Vector3().subVectors(lang.group.position, camera.position).normalize(), 6
+          );
+        }
+      }
+
+      // Clamp float height
+      if (lang.group.position.y < 0.8)  lang.group.position.y = 0.8;
+      if (lang.group.position.y > 9.0)  lang.group.position.y = 9.0;
+    }
+
+    if (playerHitCooldown > 0) playerHitCooldown -= delta;
+  }
+
+  // ── Floor ──────────────────────────────────────────────────────────────────
+  const floorGeo = new THREE.PlaneGeometry(140, 140, 70, 70);
+  floorGeo.rotateX(-Math.PI / 2);
+  const floorMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, wireframe: false, transparent: true, opacity: 0.78, side: THREE.DoubleSide });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.frustumCulled = false;
+  scene.add(floor);
+  const posAttr = floorGeo.attributes.position;
+
+  function wave(wx, wz, t) {
+    return (
+      Math.sin(wx * 0.12 + t * 0.70) * 2.0 +
+      Math.cos(wz * 0.10 + t * 0.50) * 1.5 +
+      Math.sin((wx + wz) * 0.07 + t * 1.00) * 1.0
+    );
+  }
+
+  function animateFloor(t, px, pz) {
+    for (let i = 0; i < posAttr.count; i++) {
+      posAttr.setY(i, wave(posAttr.getX(i) + px, posAttr.getZ(i) + pz, t));
+    }
+    posAttr.needsUpdate = true;
+    floor.position.set(px, 0, pz);
+    floor.rotation.x = Math.sin(t * 0.22) * 0.20;
+    floor.rotation.z = Math.cos(t * 0.18) * 0.16;
+  }
+
+  // ── Black hole ─────────────────────────────────────────────────────────────
+  // Far enough to require real travel, large enough to see from spawn
+  const BH_POS           = new THREE.Vector3(0, 0, -350); // overwritten by randomizeBH()
+  const BH_PULL_RADIUS   = 330;  // starts pulling here (covers full spawn-to-BH range)
+  const BH_CAPTURE_RADIUS = 18;  // triggers hyperspace
+
+  const bhGroup = new THREE.Group();
+  scene.add(bhGroup);
+
+  // Solid black event horizon — large sphere half-embedded in the ground plane
+  const eventHorizon = new THREE.Mesh(
+    new THREE.SphereGeometry(16, 40, 40),
+    new THREE.MeshBasicMaterial({ color: 0x000000 })
+  );
+  eventHorizon.position.y = -4; // sink lower so bottom half is underground
+  bhGroup.add(eventHorizon);
+
+  // fog:false on all glow elements so they're always visible at any distance
+  function makeDisk(radius, tube, segs, color, opacity) {
+    const m = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, tube, 12, segs),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, fog: false })
+    );
+    m.rotation.x = Math.PI / 2;
+    return m;
+  }
+
+  const diskInner = makeDisk(22,  1.4, 80, 0xffdd00, 1.00); // bright gold
+  const diskMid   = makeDisk(30,  2.0, 80, 0xff6600, 1.00); // deep orange
+  const diskOuter = makeDisk(42,  1.0, 64, 0xff2200, 0.60); // dark red
+  const haloRing  = makeDisk(58,  0.4, 48, 0xff4400, 0.22); // very faint outer halo
+  bhGroup.add(diskInner, diskMid, diskOuter, haloRing);
+
+  // Gravitational lensing arc — tilted ring arching over the top of the sphere
+  const lensingArc = makeDisk(24, 0.8, 64, 0xffcc88, 0.88);
+  lensingArc.rotation.x = Math.PI / 2 - 0.55;
+  lensingArc.position.y = 6;
+  bhGroup.add(lensingArc);
+
+  // Glow sprite — always faces camera, fog:false, additive blending so it
+  // accumulates against the dark sky and stays visible from any distance
+  const glowCanvas = document.createElement('canvas');
+  glowCanvas.width = glowCanvas.height = 128;
+  const glowCtx = glowCanvas.getContext('2d');
+  const grad = glowCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0,    'rgba(255,170, 40, 1.0)');
+  grad.addColorStop(0.25, 'rgba(255, 80,  0, 0.6)');
+  grad.addColorStop(0.6,  'rgba(180, 20,  0, 0.2)');
+  grad.addColorStop(1,    'rgba(  0,  0,  0, 0.0)');
+  glowCtx.fillStyle = grad;
+  glowCtx.fillRect(0, 0, 128, 128);
+
+  const bhSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(glowCanvas),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+    opacity: 0.3,
+  }));
+  bhSprite.scale.set(60, 60, 1);
+  bhGroup.add(bhSprite);
+
+  // Material refs for pulse animation
+  const bhGlowMats = [
+    { mat: diskInner.material,  base: 1.00 },
+    { mat: diskMid.material,    base: 1.00 },
+    { mat: diskOuter.material,  base: 0.60 },
+    { mat: haloRing.material,   base: 0.22 },
+    { mat: lensingArc.material, base: 0.88 },
+  ];
+
+  // ── Galaxy starfield ───────────────────────────────────────────────────────
+  const starField = (() => {
+    const COUNT  = 7000;
+    const pos    = new Float32Array(COUNT * 3);
+    const col    = new Float32Array(COUNT * 3);
+    const RADIUS = 480;
+    const TILT   = 0.48; // radians — angle of the galactic plane
+
+    for (let i = 0; i < COUNT; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi   = Math.acos(2 * Math.random() - 1);
+      let x = Math.sin(phi) * Math.cos(theta);
+      let y = Math.cos(phi);
+      let z = Math.sin(phi) * Math.sin(theta);
+
+      // ~40% of stars squashed toward a tilted plane → Milky Way band
+      if (Math.random() < 0.40) {
+        y *= 0.12;
+        const ny = y * Math.cos(TILT) - z * Math.sin(TILT);
+        const nz = y * Math.sin(TILT) + z * Math.cos(TILT);
+        y = ny; z = nz;
+        const len = Math.sqrt(x*x + y*y + z*z) || 1;
+        x /= len; y /= len; z /= len;
+      }
+
+      const r = RADIUS + Math.random() * 60;
+      pos[i*3] = x*r;  pos[i*3+1] = y*r;  pos[i*3+2] = z*r;
+
+      const bright = 0.45 + Math.random() * 0.55;
+      const type   = Math.random();
+      if (type < 0.62) {                         // blue-white
+        col[i*3] = bright*0.88; col[i*3+1] = bright*0.93; col[i*3+2] = bright;
+      } else if (type < 0.80) {                  // warm white / yellow
+        col[i*3] = bright;      col[i*3+1] = bright*0.90; col[i*3+2] = bright*0.65;
+      } else if (type < 0.92) {                  // orange
+        col[i*3] = bright;      col[i*3+1] = bright*0.60; col[i*3+2] = bright*0.30;
+      } else {                                    // faint red
+        col[i*3] = bright*0.85; col[i*3+1] = bright*0.30; col[i*3+2] = bright*0.20;
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+    const sf = new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 1.6,
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.88,
+      fog: false,
+    }));
+    scene.add(sf);
+    return sf;
+  })();
+
+  // ── Hyperspace scene ───────────────────────────────────────────────────────
+  const hyperScene = new THREE.Scene();
+  hyperScene.background = new THREE.Color(0x000000);
+  const hyperCam = new THREE.PerspectiveCamera(90, innerWidth / innerHeight, 0.1, 2000);
+
+  const RING_COUNT   = 80;
+  const RING_SPACING = 10;
+  const HYPER_SPEED  = 130;
+  const tunnelGroup  = new THREE.Group();
+  hyperScene.add(tunnelGroup);
+  const tunnelRings  = [];
+
+  for (let i = 0; i < RING_COUNT; i++) {
+    const color = new THREE.Color().setHSL(i / RING_COUNT, 1.0, 0.65);
+    const r     = 4 + Math.sin(i * 0.5) * 1.8;
+    const ring  = new THREE.Mesh(
+      new THREE.TorusGeometry(r, 0.07, 8, 48),
+      new THREE.MeshBasicMaterial({ color })
+    );
+    ring.position.z = -i * RING_SPACING;
+    ring.rotation.z = i * 0.25;
+    tunnelGroup.add(ring);
+    tunnelRings.push(ring);
+  }
+
+  {
+    const pos = [], col = [];
+    const len = RING_COUNT * RING_SPACING;
+    for (let i = 0; i < 120; i++) {
+      const a = (i / 120) * Math.PI * 2;
+      const r = 3.6 + (Math.random() - 0.5) * 0.8;
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      const c = new THREE.Color().setHSL(i / 120, 1, 0.6);
+      pos.push(x, y, 0,  x, y, -len);
+      col.push(c.r, c.g, c.b,  c.r, c.g, c.b);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+    tunnelGroup.add(new THREE.LineSegments(geo,
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45 })
+    ));
+  }
+
+  // ── Level configs ──────────────────────────────────────────────────────────
+  const L1_NEONS = [0x00ffcc, 0xff00ff, 0xff3300, 0x00aaff, 0xffff00, 0x88ff00, 0xff6600, 0xcc00ff];
+  const L1_GEOS  = [
+    () => new THREE.BoxGeometry(1, 1, 1),
+    () => new THREE.ConeGeometry(0.5, 1, 4),
+    () => new THREE.TorusGeometry(0.5, 0.08, 6, 16),
+    () => new THREE.CylinderGeometry(0.04, 0.04, 1, 5),
+    () => new THREE.SphereGeometry(0.5, 5, 5),
+    () => new THREE.BoxGeometry(1, 0.04, 3),
+  ];
+
+  const L2_NEONS = [0xff00cc, 0xaa00ff, 0x00ff88, 0xff0055, 0xcc00ff, 0x6600ff, 0x00ffaa, 0xff44ff];
+  const L2_GEOS  = [
+    () => new THREE.ConeGeometry(0.5, 1, 4),
+    () => new THREE.ConeGeometry(0.5, 1, 3),
+    () => new THREE.TorusKnotGeometry(0.4, 0.08, 64, 4, 2, 3),
+    () => new THREE.OctahedronGeometry(0.5, 0),
+    () => new THREE.IcosahedronGeometry(0.5, 0),
+    () => new THREE.CylinderGeometry(0.1, 0.5, 1, 4),
+  ];
+
+  let activeNeons = L1_NEONS;
+  let activeGeos  = L1_GEOS;
+
+  // ── Skyline ────────────────────────────────────────────────────────────────
+  const cityGroup = new THREE.Group();
+  scene.add(cityGroup);
+
+  function bRnd(i, n) {
+    const v = Math.sin(i * 157.3 + n * 53.7) * 43758.5453;
+    return v - Math.floor(v);
+  }
+
+  function buildSkyline(level) {
+    while (cityGroup.children.length) {
+      const c = cityGroup.children[0];
+      cityGroup.remove(c);
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    }
+    for (let i = 0; i < 64; i++) {
+      const angle = (i / 64) * Math.PI * 2;
+      const r     = 48 + (bRnd(i, 0) - 0.5) * 22;
+      const x     = Math.cos(angle) * r;
+      const z     = Math.sin(angle) * r;
+      const h     = 6 + bRnd(i, 1) * (level === 1 ? 40 : 48);
+      let geo, color;
+
+      if (level === 1) {
+        const isSpire = bRnd(i, 4) > 0.82;
+        geo   = isSpire
+          ? new THREE.CylinderGeometry(0.07, 0.07, h * 1.6, 4)
+          : new THREE.BoxGeometry(1.5 + bRnd(i, 2) * 3.5, h, 1.5 + bRnd(i, 3) * 3.5);
+        color = bRnd(i, 5) > 0.75 ? 0x00bbcc : 0x004455;
+      } else {
+        const isKnot = bRnd(i, 4) > 0.5;
+        geo   = isKnot
+          ? new THREE.TorusKnotGeometry(0.7 + bRnd(i, 6) * 0.8, 0.13, 80, 4, 2, 3)
+          : new THREE.ConeGeometry(0.3 + bRnd(i, 6) * 2, h, 4);
+        color = bRnd(i, 5) > 0.65 ? 0xaa00ff : 0x330055;
+      }
+
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, wireframe: true }));
+      if (level === 2 && bRnd(i, 4) > 0.5) {
+        const s = 1 + bRnd(i, 7) * 2;
+        mesh.scale.set(s, s * 3, s);
+        mesh.rotation.set(bRnd(i, 8) * Math.PI * 0.3, bRnd(i, 9) * Math.PI * 2, 0);
+      }
+      mesh.position.set(x, h / 2, z);
+      cityGroup.add(mesh);
+    }
+  }
+  buildSkyline(1);
+
+  // ── Generative world ───────────────────────────────────────────────────────
+  const CHUNK = 30, RADIUS = 3;
+
+  function rnd(cx, cz, n) {
+    const v = Math.sin(cx * 127.1 + cz * 311.7 + n * 74.3) * 43758.5453;
+    return v - Math.floor(v);
+  }
+
+  const chunks = new Map();
+
+  function spawnChunk(cx, cz) {
+    const key = `${cx},${cz}`;
+    if (chunks.has(key)) return;
+    const count  = 1 + Math.floor(rnd(cx, cz, 0) * 3);
+    const meshes = [];
+    for (let i = 0; i < count; i++) {
+      const n   = i * 12;
+      const x   = cx * CHUNK + (rnd(cx, cz, n+1) - 0.5) * CHUNK * 0.9;
+      const z   = cz * CHUNK + (rnd(cx, cz, n+2) - 0.5) * CHUNK * 0.9;
+      const y   = rnd(cx, cz, n+3) * 6;
+      const geo = activeGeos[Math.floor(rnd(cx, cz, n+4) * activeGeos.length)]();
+      const mat = new THREE.MeshBasicMaterial({
+        color: activeNeons[Math.floor(rnd(cx, cz, n+5) * activeNeons.length)],
+        wireframe: true,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      const s = 0.4 + rnd(cx, cz, n+6) * 9;
+      mesh.scale.set(s, s * (0.4 + rnd(cx, cz, n+7) * 3), s);
+      mesh.position.set(x, y, z);
+      mesh.rotation.set(rnd(cx, cz, n+8) * Math.PI, rnd(cx, cz, n+9) * Math.PI * 2, 0);
+      mesh.userData.rx = (rnd(cx, cz, n+10) - 0.5) * 0.6;
+      mesh.userData.ry = (rnd(cx, cz, n+11) - 0.5) * 0.8;
+      scene.add(mesh);
+      meshes.push(mesh);
+    }
+    chunks.set(key, meshes);
+  }
+
+  function cullChunk(key) {
+    const meshes = chunks.get(key);
+    if (!meshes) return;
+    meshes.forEach(m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
+    chunks.delete(key);
+  }
+
+  function updateChunks() {
+    const cx = Math.floor(camera.position.x / CHUNK);
+    const cz = Math.floor(camera.position.z / CHUNK);
+    const needed = new Set();
+    for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+      for (let dz = -RADIUS; dz <= RADIUS; dz++) {
+        const key = `${cx+dx},${cz+dz}`;
+        needed.add(key);
+        spawnChunk(cx+dx, cz+dz);
+      }
+    }
+    for (const key of chunks.keys()) { if (!needed.has(key)) cullChunk(key); }
+  }
+
+  // ── Level transitions ──────────────────────────────────────────────────────
+  function randomizeBH() {
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = 300 + Math.random() * 100;
+    BH_POS.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+    bhGroup.position.copy(BH_POS);
+  }
+
+  function applyL1World() {
+    scene.background.setHex(0x000208);
+    scene.fog.color.setHex(0x000208);
+    scene.fog.density = 0.025;
+    floorMat.color.setHex(0x00ffcc);
+    activeNeons = L1_NEONS;
+    activeGeos  = L1_GEOS;
+    buildSkyline(1);
+    randomizeBH();
+    bhGroup.visible = true;
+  }
+
+  function enterLevel2() {
+    state = 'l2';
+    for (const key of [...chunks.keys()]) cullChunk(key);
+    scene.background.setHex(0x0a0015);
+    scene.fog.color.setHex(0x0a0015);
+    scene.fog.density = 0.028;
+    floorMat.color.setHex(0xff00cc);
+    activeNeons = L2_NEONS;
+    activeGeos  = L2_GEOS;
+    buildSkyline(2);
+    bhGroup.visible = false;
+    camera.position.set(200, 4, 200);
+    vy = 0; grounded = false;
+    suckOverlay.style.opacity = 0;
+    weaponUI.style.display = 'block';
+    clearTimeout(l1HintTimer); l1Hint.style.opacity = '0';
+    clearLangoliers();
+    playerHp = 4; playerHitCooldown = 0; playerDead = false;
+    langSpawnTimer = 3;
+    updateHUD();
+  }
+
+  function restartGame() {
+    for (const key of [...chunks.keys()]) cullChunk(key);
+    for (const { mesh, mat } of lasers) { scene.remove(mesh); mesh.geometry.dispose(); mat.dispose(); }
+    lasers.length = 0;
+    clearLangoliers();
+    playerHp = 4; playerHitCooldown = 0; playerDead = false;
+    langSpawnTimer = 3;
+    deathScreen.style.display = 'none';
+    applyL1World();
+    state = 'l1';
+    camera.position.set(0, 2, 0);
+    vy = 0; grounded = true;
+    suckOverlay.style.opacity = 0;
+    weaponUI.style.display = 'none';
+    updateHUD();
+    showL1Hint();
+    if (!controls.isLocked) controls.lock();
+  }
+
+  // ── Resize ─────────────────────────────────────────────────────────────────
+  window.addEventListener('resize', () => {
+    camera.aspect = hyperCam.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    hyperCam.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // ── Physics state ──────────────────────────────────────────────────────────
+  const clock = new THREE.Clock();
+  const SPEED = 16, GRAVITY = 20, JUMP_FORCE_L1 = 20, JUMP_FORCE_L2 = 20;
+  let prevT = 0, vy = 0, grounded = true;
+
+  // ── Main loop ──────────────────────────────────────────────────────────────
+  function animate() {
+    requestAnimationFrame(animate);
+    const t     = clock.getElapsedTime();
+    const delta = Math.min(t - prevT, 0.05);
+    prevT = t;
+
+    // ── Hyperspace ────────────────────────────────────────────────────────
+    if (state === 'hyperspace') {
+      hyperspaceTimer += delta;
+      hyperCam.position.z -= HYPER_SPEED * delta;
+      for (const ring of tunnelRings) {
+        ring.rotation.z += delta * 1.5;
+        if (ring.position.z - hyperCam.position.z > RING_SPACING) {
+          ring.position.z -= RING_COUNT * RING_SPACING;
+        }
+      }
+      renderer.render(hyperScene, hyperCam);
+      if (hyperspaceTimer >= 5) enterLevel2();
+      return;
+    }
+
+    if (playerDead) { renderer.render(scene, camera); return; }
+
+    // ── Vertical physics ──────────────────────────────────────────────────
+    const groundY = wave(camera.position.x, camera.position.z, t) + 1.7;
+    if (grounded && jumpPressed && controls.isLocked) { vy = state === 'l2' ? JUMP_FORCE_L2 : JUMP_FORCE_L1; grounded = false; }
+    jumpPressed = false;
+
+    if (grounded) {
+      camera.position.y = groundY; vy = 0;
+    } else {
+      vy -= GRAVITY * delta;
+      camera.position.y += vy * delta;
+      if (camera.position.y <= groundY) { camera.position.y = groundY; vy = 0; grounded = true; }
+    }
+
+    // ── WASD ──────────────────────────────────────────────────────────────
+    if (controls.isLocked) {
+      const dir = new THREE.Vector3();
+      if (keys['KeyW'] || keys['ArrowUp'])    dir.z -= 1;
+      if (keys['KeyS'] || keys['ArrowDown'])  dir.z += 1;
+      if (keys['KeyA'] || keys['ArrowLeft'])  dir.x -= 1;
+      if (keys['KeyD'] || keys['ArrowRight']) dir.x += 1;
+      if (dir.lengthSq() > 0) {
+        dir.normalize().multiplyScalar(SPEED * delta);
+        controls.moveRight(dir.x);
+        controls.moveForward(-dir.z);
+      }
+    }
+
+    // ── Auto-fire ─────────────────────────────────────────────────────────
+    if (mouseFireHeld || keys['KeyF']) fireLaser();
+
+    // ── Black hole ────────────────────────────────────────────────────────
+    if (state === 'l1') {
+      const dx   = BH_POS.x - camera.position.x;
+      const dz   = BH_POS.z - camera.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist < BH_PULL_RADIUS) {
+        const frac  = 1 - dist / BH_PULL_RADIUS;
+        // very gentle at distance, only overwhelming when very close (frac^5 curve)
+        const speed = frac * frac * frac * frac * frac * 600;
+        const inv   = 1 / Math.max(dist, 0.5);
+        camera.position.x += dx * inv * speed * delta;
+        camera.position.z += dz * inv * speed * delta;
+        suckOverlay.style.opacity = (frac * frac * 0.9).toFixed(3);
+
+        if (dist < BH_CAPTURE_RADIUS) {
+          state = 'hyperspace';
+          hyperspaceTimer = 0;
+          hyperCam.position.set(0, 0, 0);
+          tunnelRings.forEach((ring, i) => { ring.position.z = -i * RING_SPACING; });
+          return;
+        }
+      } else {
+        suckOverlay.style.opacity = 0;
+      }
+
+      diskInner.rotation.y += delta * 0.50;
+      diskMid.rotation.y   -= delta * 0.30;
+      diskOuter.rotation.y += delta * 0.16;
+      haloRing.rotation.y  -= delta * 0.08;
+
+      // Slow breathe + subtle organic flicker
+      const breathe = 0.5 + 0.5 * Math.sin(t * 2.0);
+      const flicker  = 1.0 - 0.07 * (0.5 + 0.5 * Math.sin(t * 11.3 + Math.sin(t * 4.7) * 2.0));
+      const pulse    = breathe * flicker;
+      for (const { mat, base } of bhGlowMats) {
+        mat.opacity = base * (0.35 + 0.65 * pulse);
+      }
+      // Sprite pulses between a minimum visible glow and full brightness
+      bhSprite.material.opacity = 0.10 + 0.50 * pulse;
+    }
+
+    // ── Spin world objects ────────────────────────────────────────────────
+    for (const meshes of chunks.values()) {
+      for (const m of meshes) {
+        m.rotation.x += m.userData.rx * delta;
+        m.rotation.y += m.userData.ry * delta;
+      }
+    }
+
+    // ── Lasers + langolier collision ──────────────────────────────────────
+    for (let i = lasers.length - 1; i >= 0; i--) {
+      const laser = lasers[i];
+      laser.life -= delta;
+      if (laser.life <= 0) {
+        scene.remove(laser.mesh);
+        laser.mesh.geometry.dispose();
+        laser.mat.dispose();
+        lasers.splice(i, 1);
+        continue;
+      }
+      laser.mesh.position.addScaledVector(laser.dir, LASER_SPEED * delta);
+      laser.mat.opacity = laser.life / LASER_LIFETIME;
+
+      if (state === 'l2') {
+        let hit = false;
+        for (let ei = langoliers.length - 1; ei >= 0; ei--) {
+          const lang = langoliers[ei];
+          if (laser.mesh.position.distanceTo(lang.group.position) < LASER_HIT_RADIUS) {
+            lang.hp--;
+            lang.flashTimer = 0.15;
+            lang.teeth.material.color.setHex(0xffffff);
+            if (lang.hp <= 0) { removeLangolier(lang); langoliers.splice(ei, 1); }
+            scene.remove(laser.mesh); laser.mesh.geometry.dispose(); laser.mat.dispose();
+            lasers.splice(i, 1);
+            hit = true; break;
+          }
+        }
+        if (hit) continue;
+      }
+    }
+
+    if (state === 'l2') updateLangoliers(delta);
+
+    animateFloor(t, camera.position.x, camera.position.z);
+    cityGroup.position.set(camera.position.x, 0, camera.position.z);
+    starField.position.set(camera.position.x, 0, camera.position.z);
+    updateChunks();
+    renderer.render(scene, camera);
+  }
+
+  randomizeBH();
+  animate();
+</script>
+</body>
+</html>
